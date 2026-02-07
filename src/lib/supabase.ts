@@ -1,21 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 
-// 환경 변수에서 가져오기
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+// 환경 변수에서 가져오기 (없으면 하드코딩된 DB 값 사용)
+const fallbackUrl = 'https://atsqqdnlztwuebgorjim.supabase.co';
+const fallbackKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0c3FxZG5senR3dWViZ29yamltIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgwMjUyNTIsImV4cCI6MjA4MzYwMTI1Mn0.ASEMrHiNGAPHFc97Fs0ZTS1Zia85X09P3rkkSiK7Er4';
 
-// 환경 변수 필수 체크
-if (!supabaseUrl || !supabaseAnonKey) {
-  if (typeof window !== 'undefined') {
-    console.error(
-      '❌ Supabase 환경 변수가 설정되지 않았습니다.\n' +
-      '프로젝트 루트에 .env 파일을 생성하고 다음 변수를 설정해주세요:\n' +
-      'VITE_SUPABASE_URL=your_supabase_url\n' +
-      'VITE_SUPABASE_ANON_KEY=your_supabase_anon_key'
-    );
-  }
-  throw new Error('Supabase 환경 변수가 필요합니다. .env 파일을 확인해주세요.');
-}
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL || fallbackUrl;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY || fallbackKey;
 
 const finalUrl = supabaseUrl;
 const finalKey = supabaseAnonKey;
