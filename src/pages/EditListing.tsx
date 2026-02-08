@@ -16,11 +16,14 @@ import {
 import { Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { Material } from "@/components/MaterialCard";
+import { supabase } from "@/lib/supabase";
 
 const EditListing = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const [images, setImages] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [listingSource, setListingSource] = useState<"supabase" | "localStorage" | null>(null);
   const [formData, setFormData] = useState({
     title: "",
     type: "",
@@ -32,24 +35,66 @@ const EditListing = () => {
   });
 
   useEffect(() => {
-    const userListings = JSON.parse(localStorage.getItem("userListings") || "[]");
-    const listing = userListings.find((item: Material) => item.id === id);
-    
-    if (listing) {
-      setFormData({
-        title: listing.title,
-        type: listing.type,
-        category: listing.category || "",
-        price: listing.price.toString(),
-        tokenPrice: listing.tokenPrice?.toString() || "",
-        location: listing.location,
-        description: "",
-      });
-      setImages([listing.imageUrl]);
-    } else {
-      toast.error("자재를 찾을 수 없습니다");
-      navigate("/materials");
+    if (!id) {
+      setLoading(false);
+      return;
     }
+
+    const load = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+
+      const { data: listing, error } = await supabase
+        .from("listings")
+        .select("id, user_id, title, price, token_price, type, category, location, description")
+        .eq("id", id)
+        .single();
+
+      if (!error && listing) {
+        if (user && listing.user_id !== user.id) {
+          toast.error("본인 게시물만 수정할 수 있습니다");
+          navigate("/");
+          return;
+        }
+        setListingSource("supabase");
+        setFormData({
+          title: listing.title,
+          type: listing.type,
+          category: listing.category || "",
+          price: String(listing.price),
+          tokenPrice: listing.token_price ? String(listing.token_price) : "",
+          location: listing.location,
+          description: listing.description || "",
+        });
+        const { data: imgs } = await supabase
+          .from("listing_images")
+          .select("image_url")
+          .eq("listing_id", id)
+          .order("image_order", { ascending: true });
+        setImages((imgs || []).map((i: any) => i.image_url));
+      } else {
+        const userListings = JSON.parse(localStorage.getItem("userListings") || "[]");
+        const found = userListings.find((item: Material) => item.id === id);
+        if (found) {
+          setListingSource("localStorage");
+          setFormData({
+            title: found.title,
+            type: found.type,
+            category: found.category || "",
+            price: String(found.price),
+            tokenPrice: found.tokenPrice ? String(found.tokenPrice) : "",
+            location: found.location,
+            description: "",
+          });
+          setImages([found.imageUrl]);
+        } else {
+          toast.error("자재를 찾을 수 없습니다");
+          navigate("/");
+        }
+      }
+      setLoading(false);
+    };
+
+    load();
   }, [id, navigate]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -66,60 +111,102 @@ const EditListing = () => {
     setImages(images.filter((_, i) => i !== index));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!formData.title || !formData.type || !formData.price || !formData.location) {
       toast.error("필수 항목을 모두 입력해주세요");
       return;
     }
 
-    const userListings = JSON.parse(localStorage.getItem("userListings") || "[]");
-    const price = parseInt(formData.price);
-    const tokenPrice = formData.tokenPrice 
-      ? parseInt(formData.tokenPrice) 
+    const price = parseInt(formData.price, 10);
+    const tokenPrice = formData.tokenPrice
+      ? parseInt(formData.tokenPrice, 10)
       : Math.max(1, Math.round(price / 500000));
-    
+
+    if (listingSource === "supabase" && id) {
+      const { error } = await supabase
+        .from("listings")
+        .update({
+          title: formData.title,
+          price,
+          token_price: tokenPrice,
+          type: formData.type,
+          category: formData.category || null,
+          location: formData.location,
+          description: formData.description || null,
+        })
+        .eq("id", id);
+
+      if (error) {
+        toast.error("수정에 실패했습니다: " + error.message);
+        return;
+      }
+      toast.success("자재가 수정되었습니다!");
+      window.dispatchEvent(new Event("userListingsUpdated"));
+      setTimeout(() => navigate("/"), 500);
+      return;
+    }
+
+    const userListings = JSON.parse(localStorage.getItem("userListings") || "[]");
     const updatedListings = userListings.map((listing: Material) => {
       if (listing.id === id) {
         return {
           ...listing,
           title: formData.title,
-          price: price,
-          tokenPrice: tokenPrice,
-          type: formData.type as "sale" | "buy" | "rent" | "lease",
-          category: formData.category as "steel" | "concrete" | "wood" | "scaffold" | "equipment" | "other" | undefined,
+          price,
+          tokenPrice,
+          type: formData.type as Material["type"],
+          category: (formData.category || undefined) as Material["category"],
           location: formData.location,
           imageUrl: images[0] || listing.imageUrl,
         };
       }
       return listing;
     });
-
     localStorage.setItem("userListings", JSON.stringify(updatedListings));
-
-    // Dispatch custom event to update MyPage in real-time
     window.dispatchEvent(new Event("userListingsUpdated"));
-
     toast.success("자재가 수정되었습니다!");
-    setTimeout(() => {
-      navigate("/materials");
-    }, 1000);
+    setTimeout(() => navigate("/materials"), 1000);
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!confirm("정말 삭제하시겠습니까?")) return;
+
+    if (listingSource === "supabase" && id) {
+      const { error } = await supabase.from("listings").delete().eq("id", id);
+      if (error) {
+        toast.error("삭제에 실패했습니다: " + error.message);
+        return;
+      }
+      toast.success("자재가 삭제되었습니다");
+      window.dispatchEvent(new Event("userListingsUpdated"));
+      navigate("/");
+      return;
+    }
 
     const userListings = JSON.parse(localStorage.getItem("userListings") || "[]");
     const updatedListings = userListings.filter((listing: Material) => listing.id !== id);
     localStorage.setItem("userListings", JSON.stringify(updatedListings));
-
-    // Dispatch custom event to update MyPage in real-time
     window.dispatchEvent(new Event("userListingsUpdated"));
-
     toast.success("자재가 삭제되었습니다");
     navigate("/materials");
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header />
+        <div className="container mx-auto flex items-center justify-center px-4 py-16">
+          <p className="text-muted-foreground">불러오는 중...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!listingSource) {
+    return null;
+  }
 
   return (
     <div className="min-h-screen bg-background">

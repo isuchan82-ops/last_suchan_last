@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { Header } from "@/components/Header";
 import { MaterialCard, Material } from "@/components/MaterialCard";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { supabase } from "@/lib/supabase";
+import { formatDistanceToNow } from "date-fns";
+import { ko } from "date-fns/locale";
+import { toast } from "sonner";
 
 // Mock data
 const mockMaterials: Material[] = [
@@ -99,19 +104,96 @@ const categories = [
   "기타자재",
 ];
 
+const defaultImageUrl = "https://images.unsplash.com/photo-1581094271901-8022df4466f9?w=800&auto=format&fit=crop";
+
 const Index = () => {
+  const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("전체");
   const [selectedType, setSelectedType] = useState("all");
   const [allMaterials, setAllMaterials] = useState<Material[]>(mockMaterials);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const materialsSectionRef = useRef<HTMLElement>(null);
   const filtersSectionRef = useRef<HTMLElement>(null);
   const isInitialMount = useRef(true);
 
-  useEffect(() => {
-    const userListings = JSON.parse(localStorage.getItem("userListings") || "[]");
-    setAllMaterials([...userListings, ...mockMaterials]);
+  const loadListings = useCallback(async () => {
+    try {
+      const { data: listings, error } = await supabase
+        .from("listings")
+        .select("id, user_id, title, price, token_price, type, category, location, status, created_at")
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      const materials: Material[] = (listings || []).map((row: any) => ({
+        id: row.id,
+        user_id: row.user_id,
+        title: row.title,
+        price: row.price,
+        tokenPrice: row.token_price ?? undefined,
+        type: row.type,
+        category: row.category ?? undefined,
+        location: row.location,
+        imageUrl: defaultImageUrl,
+        timeAgo: row.created_at
+          ? formatDistanceToNow(new Date(row.created_at), { addSuffix: true, locale: ko })
+          : "",
+        status: row.status,
+      }));
+
+      // 첫 이미지 가져오기
+      if (materials.length > 0) {
+        const { data: images } = await supabase
+          .from("listing_images")
+          .select("listing_id, image_url")
+          .in("listing_id", materials.map((m) => m.id))
+          .order("image_order", { ascending: true });
+
+        const firstImageByListing: Record<string, string> = {};
+        (images || []).forEach((img: any) => {
+          if (!firstImageByListing[img.listing_id]) firstImageByListing[img.listing_id] = img.image_url;
+        });
+        materials.forEach((m) => {
+          if (firstImageByListing[m.id]) m.imageUrl = firstImageByListing[m.id];
+        });
+      }
+
+      setAllMaterials([...materials, ...mockMaterials]);
+    } catch (err) {
+      console.error("목록 로드 실패:", err);
+      const userListings = JSON.parse(localStorage.getItem("userListings") || "[]");
+      setAllMaterials([...userListings, ...mockMaterials]);
+    }
   }, []);
+
+  useEffect(() => {
+    loadListings();
+    const handler = () => loadListings();
+    window.addEventListener("userListingsUpdated", handler);
+    return () => window.removeEventListener("userListingsUpdated", handler);
+  }, [loadListings]);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setCurrentUserId(user?.id ?? null);
+    });
+  }, []);
+
+  const handleDeleteListing = useCallback(
+    async (id: string) => {
+      if (!confirm("정말 삭제하시겠습니까?")) return;
+      try {
+        const { error } = await supabase.from("listings").delete().eq("id", id);
+        if (error) throw error;
+        toast.success("자재가 삭제되었습니다");
+        loadListings();
+      } catch (err: any) {
+        toast.error(err.message || "삭제에 실패했습니다");
+      }
+    },
+    [loadListings]
+  );
 
   // 카테고리 변경 시 부드럽게 스크롤 (필요한 경우에만)
   useEffect(() => {
@@ -310,7 +392,12 @@ const Index = () => {
                 animationDelay: `${Math.min(index * 30, 300)}ms`,
               }}
             >
-              <MaterialCard material={material} />
+              <MaterialCard
+                material={material}
+                isOwner={!!currentUserId && material.user_id === currentUserId}
+                onEdit={(id) => navigate(`/edit-listing/${id}`)}
+                onDelete={handleDeleteListing}
+              />
             </div>
           ))}
         </div>

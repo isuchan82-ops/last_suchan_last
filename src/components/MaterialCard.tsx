@@ -1,7 +1,8 @@
 import { Link } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { MapPin, Clock, Coins } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { MapPin, Clock, Coins, Pencil, Trash2 } from "lucide-react";
 
 export interface Material {
   id: string;
@@ -14,10 +15,14 @@ export interface Material {
   imageUrl: string;
   timeAgo: string;
   status: "available" | "reserved" | "sold";
+  user_id?: string;
 }
 
 interface MaterialCardProps {
   material: Material;
+  isOwner?: boolean;
+  onEdit?: (id: string) => void;
+  onDelete?: (id: string) => void;
 }
 
 const typeLabels = {
@@ -39,10 +44,10 @@ const statusColors = {
   sold: "bg-muted text-muted-foreground",
 };
 
-export const MaterialCard = ({ material }: MaterialCardProps) => {
+export const MaterialCard = ({ material, isOwner, onEdit, onDelete }: MaterialCardProps) => {
   return (
-    <Link to={`/listing/${material.id}`}>
-      <Card className="group overflow-hidden transition-all duration-300 hover:shadow-[var(--shadow-elevated)] hover:-translate-y-1">
+    <Link to={`/listing/${material.id}`} className="block">
+      <Card className="group relative overflow-hidden transition-all duration-300 hover:shadow-[var(--shadow-elevated)] hover:-translate-y-1">
         <div className="relative aspect-video overflow-hidden bg-muted">
           <img
             src={material.imageUrl}
@@ -52,6 +57,46 @@ export const MaterialCard = ({ material }: MaterialCardProps) => {
           <Badge className={`absolute top-2 right-2 ${statusColors[material.status]}`}>
             {statusLabels[material.status]}
           </Badge>
+          {isOwner && (onEdit || onDelete) && (
+            <div
+              className="absolute top-2 left-2 flex gap-1"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+            >
+              {onEdit && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onEdit(material.id);
+                  }}
+                >
+                  <Pencil className="h-4 w-4" />
+                </Button>
+              )}
+              {onDelete && (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onDelete(material.id);
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          )}
         </div>
         <CardContent className="p-4">
           <div className="mb-2 flex items-center gap-2">

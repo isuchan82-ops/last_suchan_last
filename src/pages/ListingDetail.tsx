@@ -98,6 +98,7 @@ const ListingDetail = () => {
   const [selectedImage, setSelectedImage] = useState(0);
   const [views, setViews] = useState(0);
   const [likes, setLikes] = useState(0);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const typeLabels: Record<string, string> = {
     sale: "판매",
@@ -113,35 +114,84 @@ const ListingDetail = () => {
   };
 
   useEffect(() => {
-    // Get user listings from localStorage
-    const userListings = JSON.parse(localStorage.getItem("userListings") || "[]");
-    const allMaterials = [...userListings, ...mockMaterials];
-    
-    // Find the material by id
-    const foundMaterial = allMaterials.find((m: Material) => m.id === id);
-    
-    if (foundMaterial) {
-      setMaterial(foundMaterial);
-      // Initialize views and likes
-      const initialViews = Math.floor(Math.random() * 200) + 50;
-      const initialLikes = Math.floor(Math.random() * 30) + 5;
-      setViews(initialViews);
-      setLikes(initialLikes);
-      
-      // Load liked status from localStorage
-      const likedItems = JSON.parse(localStorage.getItem("likedItems") || "[]");
-      setIsLiked(likedItems.includes(id));
-    }
-    
-    // Increase view count when page loads
-    if (id) {
-      const viewCounts = JSON.parse(localStorage.getItem("viewCounts") || "{}");
-      const currentViews = viewCounts[id] || Math.floor(Math.random() * 200) + 50;
-      viewCounts[id] = currentViews + 1;
-      localStorage.setItem("viewCounts", JSON.stringify(viewCounts));
-      setViews(viewCounts[id]);
-    }
+    if (!id) return;
+
+    let cancelled = false;
+
+    const load = async () => {
+      const { data: row, error } = await supabase
+        .from("listings")
+        .select("id, user_id, title, price, token_price, type, category, location, status, created_at")
+        .eq("id", id)
+        .single();
+
+      if (!cancelled && !error && row) {
+        const { data: imgs } = await supabase
+          .from("listing_images")
+          .select("image_url")
+          .eq("listing_id", id)
+          .order("image_order", { ascending: true });
+        const imageUrl =
+          imgs?.[0]?.image_url ||
+          "https://images.unsplash.com/photo-1581094271901-8022df4466f9?w=800&auto=format&fit=crop";
+
+        const m: Material = {
+          id: row.id,
+          user_id: row.user_id,
+          title: row.title,
+          price: row.price,
+          tokenPrice: row.token_price ?? undefined,
+          type: row.type,
+          category: row.category ?? undefined,
+          location: row.location,
+          imageUrl,
+          timeAgo: row.created_at
+            ? new Date(row.created_at).toLocaleDateString("ko-KR")
+            : "",
+          status: row.status,
+        };
+        setMaterial(m);
+        setViews(Math.floor(Math.random() * 200) + 50);
+        setLikes(Math.floor(Math.random() * 30) + 5);
+        const likedItems = JSON.parse(localStorage.getItem("likedItems") || "[]");
+        setIsLiked(likedItems.includes(id));
+        return;
+      }
+
+      const userListings = JSON.parse(localStorage.getItem("userListings") || "[]");
+      const allMaterials = [...userListings, ...mockMaterials];
+      const foundMaterial = allMaterials.find((m: Material) => m.id === id);
+
+      if (!cancelled && foundMaterial) {
+        setMaterial(foundMaterial);
+        const initialViews = Math.floor(Math.random() * 200) + 50;
+        const initialLikes = Math.floor(Math.random() * 30) + 5;
+        setViews(initialViews);
+        setLikes(initialLikes);
+        const likedItems = JSON.parse(localStorage.getItem("likedItems") || "[]");
+        setIsLiked(likedItems.includes(id));
+      }
+
+      if (id) {
+        const viewCounts = JSON.parse(localStorage.getItem("viewCounts") || "{}");
+        const currentViews = viewCounts[id] || Math.floor(Math.random() * 200) + 50;
+        viewCounts[id] = currentViews + 1;
+        localStorage.setItem("viewCounts", JSON.stringify(viewCounts));
+        if (!cancelled) setViews(viewCounts[id]);
+      }
+    };
+
+    load();
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setCurrentUserId(user?.id ?? null);
+    });
+  }, []);
 
   if (!material) {
     return (
@@ -249,12 +299,42 @@ const ListingDetail = () => {
       <Header />
 
       <div className="container mx-auto px-4 py-6">
-        <Link to="/">
-          <Button variant="ghost" size="sm" className="mb-4">
-            <ChevronLeft className="mr-1 h-4 w-4" />
-            목록으로
-          </Button>
-        </Link>
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <Link to="/">
+            <Button variant="ghost" size="sm">
+              <ChevronLeft className="mr-1 h-4 w-4" />
+              목록으로
+            </Button>
+          </Link>
+          {material?.user_id && currentUserId === material.user_id && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigate(`/edit-listing/${id}`)}
+              >
+                수정
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={async () => {
+                  if (!confirm("정말 삭제하시겠습니까?")) return;
+                  const { error } = await supabase.from("listings").delete().eq("id", id);
+                  if (error) {
+                    toast.error("삭제에 실패했습니다");
+                    return;
+                  }
+                  toast.success("삭제되었습니다");
+                  window.dispatchEvent(new Event("userListingsUpdated"));
+                  navigate("/");
+                }}
+              >
+                삭제
+              </Button>
+            </>
+          )}
+        </div>
 
         <div className="grid gap-6 lg:grid-cols-3">
           {/* Left Column - Images and Details */}
